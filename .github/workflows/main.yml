@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'  # Yêu cầu Python 3.12+ theo tài liệu dự án
+          python-version: '3.12'
 
       - name: Install uv
         shell: powershell
@@ -27,73 +27,25 @@ jobs:
           echo "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Sync dependencies with uv
-        run: uv sync --extra cpu
-        # Sử dụng --extra cpu cho bản CPU (torch-free, ONNX Runtime)
-        # Nếu muốn build bản GPU, đổi thành --extra cuda
+        run: uv sync
+        # ĐÃ SỬA: Bỏ --extra cpu vì dự án không định nghĩa extra này.
+        # Nếu dự án cần extra khác, hãy sửa thành --extra <tên_extra>
 
       - name: Install eSpeak NG (required for phonemization)
         shell: powershell
         run: |
           choco install espeak-ng -y
-          # Thêm thư mục cài đặt eSpeak NG vào PATH
           echo "C:\Program Files\eSpeak NG" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
-      - name: Create PyInstaller spec file
+      - name: Build EXE with PyInstaller
         shell: powershell
         run: |
-          # Tạo file spec để đóng gói ứng dụng Web UI
-          @"
-          # -*- mode: python ; coding: utf-8 -*-
-
-          a = Analysis(
-              ['vieneu/web/app.py'],
-              pathex=[],
-              binaries=[],
-              datas=[
-                  ('src/vieneu/assets', 'vieneu/assets'),
-              ],
-              hiddenimports=[
-                  'vieneu',
-                  'onnxruntime',
-                  'gradio',
-                  'soundfile',
-                  'numpy',
-              ],
-              hookspath=[],
-              hooksconfig={},
-              runtime_hooks=[],
-              excludes=[],
-              noarchive=False,
-          )
-          pyz = PYZ(a.pure)
-
-          exe = EXE(
-              pyz,
-              a.scripts,
-              a.binaries,
-              a.datas,
-              [],
-              name='VieNeu-TTS',
-              debug=False,
-              bootloader_ignore_signals=False,
-              strip=False,
-              upx=True,
-              upx_exclude=[],
-              runtime_tmpdir=None,
-              console=True,
-              disable_windowed_traceback=False,
-              argv_emulation=False,
-              target_arch=None,
-              codesign_identity=None,
-              entitlements_file=None,
-          )
-          "@ | Out-File -FilePath build.spec -Encoding utf8
-
-      - name: Build EXE with PyInstaller
-        run: pyinstaller build.spec --clean --noconfirm
+          # Tìm file entry point (thường là app.py hoặc main.py)
+          # Thay 'app.py' bằng file chính xác nếu dự án của bạn dùng tên khác
+          uv run pyinstaller --noconfirm --onefile --console --name "VieNeu-TTS" --collect-all "vieneu" app.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
