@@ -3,8 +3,6 @@ name: Build Windows EXE
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -38,30 +36,58 @@ jobs:
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
-      # BƯỚC DEBUG: Liệt kê tất cả file .py để tìm entry point
-      - name: List Python files (Debug)
+      # BƯỚC THÔNG MINH: Tự động tìm file khởi chạy (Entry Point)
+      - name: Find Entry Point
+        id: find_entry
         shell: powershell
         run: |
-          Write-Host "=== DANH SÁCH CÁC FILE PYTHON TRONG DỰ ÁN ==="
-          Get-ChildItem -Path . -Filter *.py -Recurse | Where-Object { $_.FullName -notmatch '\.venv' } | Select-Object FullName
+          Write-Host "Đang tìm kiếm entry point (các file chứa 'if __name__ == \"__main__\":')..."
+          
+          # Tìm tất cả các file .py có chứa block main, bỏ qua thư mục .venv và .git
+          $EntryPoints = Get-ChildItem -Path . -Filter *.py -Recurse | Where-Object { $_.FullName -notmatch '\.venv' -and $_.FullName -notmatch '\.git' } | Select-String -Pattern 'if __name__ == ["'']__main__["'']' | Select-Object -ExpandProperty Path -Unique
+          
+          if (-not $EntryPoints) {
+              Write-Host "Không tìm thấy file nào chứa 'if __name__ == \"__main__\":'. Sẽ thử tìm các file tên phổ biến..."
+              $EntryPoints = Get-ChildItem -Path . -Filter *.py -Recurse | Where-Object { $_.FullName -notmatch '\.venv' -and $_.Name -match '^(app|main|webui|run|cli)\.py$' } | Select-Object -ExpandProperty FullName
+          }
+
+          Write-Host "Các file ứng viên tìm thấy:"
+          $EntryPoints | ForEach-Object { Write-Host $_ }
+
+          if ($EntryPoints.Count -eq 0) {
+              Write-Error "Không thể tìm thấy entry point nào. Vui lòng kiểm tra lại cấu trúc dự án."
+              exit 1
+          }
+
+          # Ưu tiên chọn file app.py, main.py hoặc file ở thư mục gốc
+          $SelectedEntry = $null
+          if ($EntryPoints -match 'app\.py$') {
+              $SelectedEntry = ($EntryPoints | Where-Object { $_ -match 'app\.py$' } | Select-Object -First 1)
+          } elseif ($EntryPoints -match 'main\.py$') {
+              $SelectedEntry = ($EntryPoints | Where-Object { $_ -match 'main\.py$' } | Select-Object -First 1)
+          } else {
+              $SelectedEntry = $EntryPoints[0]
+          }
+
+          # Chuyển đường dẫn tuyệt đối thành tương đối so với thư mục gốc repo
+          $RelativePath = Resolve-Path -Path $SelectedEntry -Relative
+          $RelativePath = $RelativePath -replace '^\.\\', '' -replace '^\./', ''
+          
+          Write-Host "Đã chọn Entry Point: $RelativePath"
+          "ENTRY_POINT=$RelativePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build EXE with PyInstaller
         shell: powershell
         run: |
-          # ⚠️ QUAN TRỌNG: Thay đổi đường dẫn dưới đây cho đúng với repo của bạn.
-          # Dựa trên các dự án TTS tương tự, entry point thường là:
-          # 'src/vieneu/web/app.py', 'src/vieneu/app.py', 'main.py', hoặc 'webui.py'
+          Write-Host "Bắt đầu build EXE từ file: $env:ENTRY_POINT"
           
-          # Tôi đang để mặc định là 'src/vieneu/web/app.py' - hãy kiểm tra log ở bước trên để sửa lại nếu cần.
-          $ENTRY_POINT = "src/vieneu/web/app.py"
-          
-          # Thêm --collect-all cho các thư viện quan trọng để tránh lỗi thiếu file model
+          # Sử dụng biến môi trường ENTRY_POINT đã tìm được ở bước trên
           uv run pyinstaller --noconfirm --onefile --console --name "VieNeu-TTS" `
             --collect-all "vieneu" `
             --collect-all "gradio" `
             --collect-all "onnxruntime" `
             --collect-all "soundfile" `
-            $ENTRY_POINT
+            "$env:ENTRY_POINT"
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
