@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # Cho phép chạy thủ công từ tab Actions
+  workflow_dispatch:
 
 jobs:
   build:
@@ -28,10 +28,8 @@ jobs:
 
       - name: Sync dependencies with uv
         run: uv sync
-        # ĐÃ SỬA: Bỏ --extra cpu vì dự án không định nghĩa extra này.
-        # Nếu dự án cần extra khác, hãy sửa thành --extra <tên_extra>
 
-      - name: Install eSpeak NG (required for phonemization)
+      - name: Install eSpeak NG
         shell: powershell
         run: |
           choco install espeak-ng -y
@@ -40,12 +38,30 @@ jobs:
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
+      # BƯỚC DEBUG: Liệt kê tất cả file .py để tìm entry point
+      - name: List Python files (Debug)
+        shell: powershell
+        run: |
+          Write-Host "=== DANH SÁCH CÁC FILE PYTHON TRONG DỰ ÁN ==="
+          Get-ChildItem -Path . -Filter *.py -Recurse | Where-Object { $_.FullName -notmatch '\.venv' } | Select-Object FullName
+
       - name: Build EXE with PyInstaller
         shell: powershell
         run: |
-          # Tìm file entry point (thường là app.py hoặc main.py)
-          # Thay 'app.py' bằng file chính xác nếu dự án của bạn dùng tên khác
-          uv run pyinstaller --noconfirm --onefile --console --name "VieNeu-TTS" --collect-all "vieneu" app.py
+          # ⚠️ QUAN TRỌNG: Thay đổi đường dẫn dưới đây cho đúng với repo của bạn.
+          # Dựa trên các dự án TTS tương tự, entry point thường là:
+          # 'src/vieneu/web/app.py', 'src/vieneu/app.py', 'main.py', hoặc 'webui.py'
+          
+          # Tôi đang để mặc định là 'src/vieneu/web/app.py' - hãy kiểm tra log ở bước trên để sửa lại nếu cần.
+          $ENTRY_POINT = "src/vieneu/web/app.py"
+          
+          # Thêm --collect-all cho các thư viện quan trọng để tránh lỗi thiếu file model
+          uv run pyinstaller --noconfirm --onefile --console --name "VieNeu-TTS" `
+            --collect-all "vieneu" `
+            --collect-all "gradio" `
+            --collect-all "onnxruntime" `
+            --collect-all "soundfile" `
+            $ENTRY_POINT
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
